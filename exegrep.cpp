@@ -1,0 +1,244 @@
+// exegrep
+// License: MIT
+#include <windows.h>
+#include <shlwapi.h>
+#include <cstdlib>
+#include <cstdio>
+#include <clocale>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <fcntl.h>
+
+typedef std::wstring file_t;
+typedef std::vector<std::wstring> files_t;
+
+enum RET
+{
+    RET_OK = 0,
+    RET_FILE_NOT_FOUND = 1,
+};
+
+INT exegrep_wildcard(files_t& files, const file_t& item);
+
+INT exegrep_dir(files_t& files, const file_t& item)
+{
+    WCHAR szPath[MAX_PATH];
+    lstrcpynW(szPath, item.c_str(), _countof(szPath));
+    PathAppendW(szPath, L"*");
+    return exegrep_wildcard(files, szPath);
+}
+
+INT exegrep_item(files_t& files, const file_t& item)
+{
+    DWORD attrs = GetFileAttributesW(item.c_str());
+    if (attrs == (DWORD)-1)
+    {
+        fwprintf(stderr, L"exegrep: File not found: '%ls'\n", item.c_str());
+        return RET_FILE_NOT_FOUND;
+    }
+
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        files.push_back(item);
+        return RET_OK;
+    }
+
+    return exegrep_dir(files, item);
+}
+
+INT exegrep_wildcard(files_t& files, const file_t& item)
+{
+    if (item.find(L'*') == item.npos && item.find(L'?') == item.npos)
+        return exegrep_item(files, item);
+
+    WIN32_FIND_DATAW find;
+    HANDLE hFind = FindFirstFileW(item.c_str(), &find);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return RET_OK;
+
+    WCHAR szDir[MAX_PATH];
+    lstrcpynW(szDir, item.c_str(), _countof(szDir));
+    PathRemoveFileSpecW(szDir);
+
+    WCHAR szFile[MAX_PATH];
+    INT ret = RET_OK;
+    do
+    {
+        if (lstrcmpW(find.cFileName, L".") == 0 || lstrcmpW(find.cFileName, L"..") == 0)
+            continue;
+
+        lstrcpynW(szFile, szDir, _countof(szFile));
+        PathAppendW(szFile, find.cFileName);
+
+        if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            ret = exegrep_dir(files, szFile);
+            if (ret == RET_FILE_NOT_FOUND)
+                break;
+        }
+        else
+        {
+            files.push_back(szFile);
+            ret = RET_OK;
+        }
+    } while (FindNextFileW(hFind, &find));
+    FindClose(hFind);
+
+    return ret;
+}
+
+void exegrep_sort_unique(files_t& files)
+{
+    std::sort(files.begin(), files.end());
+    auto last = std::unique(files.begin(), files.end());
+    files.erase(last, files.end());
+}
+
+bool exegrep_match(const WCHAR *pattern, const std::vector<BYTE>& data)
+{
+    std::wstring patW = pattern;
+
+    std::string patA;
+    bool is_ascii = true;
+    for (auto wch : patW)
+    {
+        if (wch > 0xFF)
+            is_ascii = false;
+        patA += (char)wch;
+    }
+
+    if (is_ascii)
+    {
+        size_t patlenA = patA.size();
+        if (patlenA > data.size())
+            return false;
+
+        LPCSTR pchA = (LPCSTR)data.data();
+        size_t cchEndA = data.size() - patlenA;
+        for (size_t ich = 0; ich < cchEndA; ++ich)
+        {
+            if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
+                return true;
+        }
+    }
+
+    size_t patlenW = patW.size();
+    size_t datalenW = data.size() / sizeof(WCHAR);
+    if (patlenW > datalenW)
+        return false;
+
+    LPCWSTR pchW = (LPCWSTR)data.data();
+    size_t cchEndW = datalenW - patlenW;
+    for (size_t ich = 0; ich < cchEndW; ++ich)
+    {
+        if (_wcsnicmp(&pchW[ich], patW.c_str(), patW.size()) == 0)
+            return true;
+    }
+
+    return false;
+}
+
+bool exegrep_find(const WCHAR *pattern, const file_t& file, std::vector<BYTE>& data)
+{
+    DWORD dwFileShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    HANDLE hFile = CreateFileW(file.c_str(), GENERIC_READ, dwFileShare, NULL,
+                               OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+                               NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        fwprintf(stderr, L"exegrep: Cannot open file: '%ls'\n", file.c_str());
+        return RET_OK;
+    }
+
+    ULARGE_INTEGER FileSize;
+    FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
+    if (FileSize.LowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
+    {
+        fwprintf(stderr, L"exegrep: Cannot read file: '%ls'\n", file.c_str());
+        CloseHandle(hFile);
+        return RET_OK;
+    }
+
+    data.resize((SIZE_T)FileSize.QuadPart);
+
+    bool matched = false;
+    DWORD cbRead;
+    if (ReadFile(hFile, data.data(), (DWORD)data.size(), &cbRead, NULL) &&
+        cbRead == FileSize.QuadPart)
+    {
+        matched = exegrep_match(pattern, data);
+    }
+    else
+    {
+        fwprintf(stderr, L"exegrep: Cannot read file: '%ls'\n", file.c_str());
+    }
+
+    CloseHandle(hFile);
+    return matched;
+}
+
+INT exegrep_search(const WCHAR *pattern, const files_t& files)
+{
+    for (auto& file : files)
+    {
+        std::vector<BYTE> data;
+        if (exegrep_find(pattern, file, data))
+        {
+            wprintf(L"%ls\n", file.c_str());
+        }
+    }
+    return RET_OK;
+}
+
+INT exegrep(const WCHAR *pattern, const files_t& items)
+{
+    files_t files;
+    for (auto& item : items)
+    {
+        INT ret = exegrep_wildcard(files, item);
+        if (ret != RET_OK)
+            return ret;
+    }
+
+    exegrep_sort_unique(files);
+
+    return exegrep_search(pattern, files);
+}
+
+INT wmain(INT argc, WCHAR **argv)
+{
+    setlocale(LC_CTYPE, "");
+    _setmode(_fileno(stdout), _O_WTEXT);
+    _setmode(_fileno(stderr), _O_WTEXT);
+
+    if (argc < 2)
+    {
+        wprintf(L"Usage: exegrep STRING [FILES]\n");
+        return 0;
+    }
+
+    auto pattern = argv[1];
+
+    files_t items;
+    if (argc == 2)
+        items.push_back(L"*");
+
+    for (INT iarg = 2; iarg < argc; ++iarg)
+    {
+        auto arg = argv[iarg];
+        items.push_back(arg);
+    }
+
+    return exegrep(pattern, items);
+}
+
+int main(void)
+{
+    INT argc;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    INT ret = wmain(argc, argv);
+    LocalFree(argv);
+    return ret;
+}
