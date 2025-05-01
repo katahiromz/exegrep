@@ -17,7 +17,30 @@ enum RET
 {
     RET_OK = 0,
     RET_FILE_NOT_FOUND = 1,
+    RET_INVALID_ARG = 2,
 };
+
+bool g_recursive = false;
+LPCWSTR g_pattern = NULL;
+
+void version(void)
+{
+    wprintf(L"exegrep version 1.1 by katahiromz\n");
+}
+
+void usage(void)
+{
+    wprintf(
+        L"Usage: exegrep [OPTIONS] STRING [FILES]\n"
+        L"\n"
+        L"Options:\n"
+        L"  -r          Recursive mode.\n"
+        L"  --help      Show this message.\n"
+        L"  --version   Show version info.\n"
+        L"\n"
+        L"Contact me: katayama.hirofumi.mz@gmail.com\n"
+    );
+}
 
 INT exegrep_wildcard(files_t& files, const file_t& item);
 
@@ -34,7 +57,7 @@ INT exegrep_item(files_t& files, const file_t& item)
     DWORD attrs = GetFileAttributesW(item.c_str());
     if (attrs == (DWORD)-1)
     {
-        fwprintf(stderr, L"exegrep: File not found: '%ls'\n", item.c_str());
+        fwprintf(stderr, L"exegrep: error: File not found: '%ls'\n", item.c_str());
         return RET_FILE_NOT_FOUND;
     }
 
@@ -44,7 +67,10 @@ INT exegrep_item(files_t& files, const file_t& item)
         return RET_OK;
     }
 
-    return exegrep_dir(files, item);
+    if (g_recursive)
+        return exegrep_dir(files, item);
+
+    return RET_OK;
 }
 
 INT exegrep_wildcard(files_t& files, const file_t& item)
@@ -65,7 +91,7 @@ INT exegrep_wildcard(files_t& files, const file_t& item)
     INT ret = RET_OK;
     do
     {
-        if (lstrcmpW(find.cFileName, L".") == 0 || lstrcmpW(find.cFileName, L"..") == 0)
+        if (wcscmp(find.cFileName, L".") == 0 || wcscmp(find.cFileName, L"..") == 0)
             continue;
 
         lstrcpynW(szFile, szDir, _countof(szFile));
@@ -73,9 +99,12 @@ INT exegrep_wildcard(files_t& files, const file_t& item)
 
         if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
         {
-            ret = exegrep_dir(files, szFile);
-            if (ret == RET_FILE_NOT_FOUND)
-                break;
+            if (g_recursive)
+            {
+                ret = exegrep_dir(files, szFile);
+                if (ret == RET_FILE_NOT_FOUND)
+                    break;
+            }
         }
         else
         {
@@ -95,9 +124,9 @@ void exegrep_sort_unique(files_t& files)
     files.erase(last, files.end());
 }
 
-bool exegrep_match(const WCHAR *pattern, const std::vector<BYTE>& data)
+bool exegrep_match(const std::vector<BYTE>& data)
 {
-    std::wstring patW = pattern;
+    std::wstring patW = g_pattern;
 
     std::string patA;
     bool is_ascii = true;
@@ -139,7 +168,7 @@ bool exegrep_match(const WCHAR *pattern, const std::vector<BYTE>& data)
     return false;
 }
 
-bool exegrep_find(const WCHAR *pattern, const file_t& file, std::vector<BYTE>& data)
+bool exegrep_find(const file_t& file, std::vector<BYTE>& data)
 {
     DWORD dwFileShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     HANDLE hFile = CreateFileW(file.c_str(), GENERIC_READ, dwFileShare, NULL,
@@ -148,7 +177,7 @@ bool exegrep_find(const WCHAR *pattern, const file_t& file, std::vector<BYTE>& d
                                NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        fwprintf(stderr, L"exegrep: Cannot open file: '%ls'\n", file.c_str());
+        fwprintf(stderr, L"exegrep: warning: Cannot open file: '%ls'\n", file.c_str());
         return RET_OK;
     }
 
@@ -156,7 +185,7 @@ bool exegrep_find(const WCHAR *pattern, const file_t& file, std::vector<BYTE>& d
     FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
     if (FileSize.LowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
     {
-        fwprintf(stderr, L"exegrep: Cannot read file: '%ls'\n", file.c_str());
+        fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
         return RET_OK;
     }
@@ -168,23 +197,23 @@ bool exegrep_find(const WCHAR *pattern, const file_t& file, std::vector<BYTE>& d
     if (ReadFile(hFile, data.data(), (DWORD)data.size(), &cbRead, NULL) &&
         cbRead == FileSize.QuadPart)
     {
-        matched = exegrep_match(pattern, data);
+        matched = exegrep_match(data);
     }
     else
     {
-        fwprintf(stderr, L"exegrep: Cannot read file: '%ls'\n", file.c_str());
+        fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
     }
 
     CloseHandle(hFile);
     return matched;
 }
 
-INT exegrep_search(const WCHAR *pattern, const files_t& files)
+INT exegrep_search(const files_t& files)
 {
     for (auto& file : files)
     {
         std::vector<BYTE> data;
-        if (exegrep_find(pattern, file, data))
+        if (exegrep_find(file, data))
         {
             wprintf(L"%ls\n", file.c_str());
         }
@@ -192,7 +221,7 @@ INT exegrep_search(const WCHAR *pattern, const files_t& files)
     return RET_OK;
 }
 
-INT exegrep(const WCHAR *pattern, const files_t& items)
+INT exegrep(const files_t& items)
 {
     files_t files;
     for (auto& item : items)
@@ -204,7 +233,7 @@ INT exegrep(const WCHAR *pattern, const files_t& items)
 
     exegrep_sort_unique(files);
 
-    return exegrep_search(pattern, files);
+    return exegrep_search(files);
 }
 
 INT wmain(INT argc, WCHAR **argv)
@@ -213,25 +242,58 @@ INT wmain(INT argc, WCHAR **argv)
     _setmode(_fileno(stdout), _O_WTEXT);
     _setmode(_fileno(stderr), _O_WTEXT);
 
-    if (argc < 2)
+    if (argc <= 1)
     {
-        wprintf(L"Usage: exegrep STRING [FILES]\n");
-        return 0;
+        usage();
+        return RET_OK;
     }
 
-    auto pattern = argv[1];
+    g_pattern = NULL;
+    g_recursive = false;
 
     files_t items;
-    if (argc == 2)
-        items.push_back(L"*");
-
-    for (INT iarg = 2; iarg < argc; ++iarg)
+    for (INT iarg = 1; iarg < argc; ++iarg)
     {
         auto arg = argv[iarg];
+        if (_wcsicmp(arg, L"/?") == 0 || _wcsicmp(arg, L"-h") == 0 ||
+            _wcsicmp(arg, L"--help") == 0 || _wcsicmp(arg, L"-help") == 0)
+        {
+            usage();
+            return RET_OK;
+        }
+        if (_wcsicmp(arg, L"/V") == 0 || _wcsicmp(arg, L"-v") == 0 ||
+            _wcsicmp(arg, L"--version") == 0 || _wcsicmp(arg, L"-version") == 0)
+        {
+            version();
+            return RET_OK;
+        }
+        if (_wcsicmp(arg, L"/R") == 0 || _wcsicmp(arg, L"-r") == 0 ||
+            _wcsicmp(arg, L"--recursive") == 0 || _wcsicmp(arg, L"-recursive") == 0)
+        {
+            g_recursive = true;
+            continue;
+        }
+        if (!g_pattern)
+        {
+            g_pattern = arg;
+            continue;
+        }
         items.push_back(arg);
     }
 
-    return exegrep(pattern, items);
+    if (!g_pattern)
+    {
+        fwprintf(stderr, L"exegrep: error: No pattern specified\n");
+        version();
+        return RET_INVALID_ARG;
+    }
+
+    if (items.empty())
+    {
+        items.push_back(L"*");
+    }
+
+    return exegrep(items);
 }
 
 int main(void)

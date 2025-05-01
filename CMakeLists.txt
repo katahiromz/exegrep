@@ -4,8 +4,8 @@
 # CMake minimum version
 cmake_minimum_required(VERSION 3.10)
 
-# project name and languages
-project(exegrep CXX)
+# project name, version, and languages
+project(exegrep VERSION 1.1 LANGUAGES CXX)
 
 # UTF-8 source code
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
