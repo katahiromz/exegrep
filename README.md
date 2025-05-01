@@ -1,4 +1,4 @@
-# exegrep by katahiromz
+﻿# exegrep by katahiromz
 
 ## Usage
 
@@ -10,6 +10,10 @@ Options:
   --help      Show this message.
   --version   Show version info.
 ```
+
+## Supported platforms
+
+- Windows XP and later
 
 ## Contact me
 
