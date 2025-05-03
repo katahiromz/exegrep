@@ -7,6 +7,8 @@ Usage: exegrep [OPTIONS] STRING [FILES]
 
 Options:
   -r          Recursive mode.
+  -q          Quiet mode.
+  -c          Case sensitive search.
   --help      Show this message.
   --version   Show version info.
 ```
