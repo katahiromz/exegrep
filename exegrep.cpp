@@ -81,14 +81,12 @@ RET ExeGrep::do_item(files_t& files, const file_t& item)
     GetFullPathNameW(item.c_str(), _countof(szFull), szFull, NULL);
 
     DWORD attrs = GetFileAttributesW(szFull);
-    if (attrs == (DWORD)-1)
-    {
+    if (attrs == (DWORD)-1) {
         fwprintf(stderr, L"exegrep: error: File not found: '%ls'\n", item.c_str());
         return RET_FILE_NOT_FOUND;
     }
 
-    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY))
-    {
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
         files.emplace(szFull);
         return RET_OK;
     }
@@ -106,8 +104,14 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
 
     WIN32_FIND_DATAW find;
     HANDLE hFind = FindFirstFileW(item.c_str(), &find);
-    if (hFind == INVALID_HANDLE_VALUE)
+    DWORD error = GetLastError();
+    if (hFind == INVALID_HANDLE_VALUE) {
+        if (!m_quiet && error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+            fwprintf(stderr, L"exegrep: warning: FindFirstFile failed: '%ls' (error code: %lu)\n",
+                     item.c_str(), error);
+        }
         return RET_OK;
+    }
 
     WCHAR szDir[MAX_PATH];
     lstrcpynW(szDir, item.c_str(), _countof(szDir));
@@ -115,25 +119,20 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
 
     WCHAR szFile[MAX_PATH];
     RET ret = RET_OK;
-    do
-    {
+    do {
         if (wcscmp(find.cFileName, L".") == 0 || wcscmp(find.cFileName, L"..") == 0)
             continue;
 
         lstrcpynW(szFile, szDir, _countof(szFile));
         PathAppendW(szFile, find.cFileName);
 
-        if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-        {
-            if (m_recursive)
-            {
+        if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (m_recursive) {
                 ret = dir(files, szFile);
                 if (ret == RET_FILE_NOT_FOUND)
                     break;
             }
-        }
-        else
-        {
+        } else {
             files.emplace(szFile);
             ret = RET_OK;
         }
@@ -147,15 +146,13 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
 {
     std::string patA;
     bool is_ascii = true;
-    for (auto wch : m_pattern)
-    {
+    for (auto wch : m_pattern) {
         if (wch > 0x7F)
             is_ascii = false;
         patA += (char)wch;
     }
 
-    if (is_ascii)
-    {
+    if (is_ascii) {
         size_t patlenA = patA.size();
         if (patlenA > data.size())
             return false;
@@ -163,14 +160,12 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
         LPCSTR pchA = (LPCSTR)data.data();
         size_t cchEndA = data.size() - patlenA;
         if (m_case_sensitive) {
-            for (size_t ich = 0; ich <= cchEndA; ++ich)
-            {
+            for (size_t ich = 0; ich <= cchEndA; ++ich) {
                 if (strncmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
                     return true;
             }
         } else {
-            for (size_t ich = 0; ich <= cchEndA; ++ich)
-            {
+            for (size_t ich = 0; ich <= cchEndA; ++ich) {
                 if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
                     return true;
             }
@@ -185,14 +180,12 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
     LPCWSTR pchW = (LPCWSTR)data.data();
     size_t cchEndW = datalenW - patlenW;
     if (m_case_sensitive) {
-        for (size_t ich = 0; ich <= cchEndW; ++ich)
-        {
+        for (size_t ich = 0; ich <= cchEndW; ++ich) {
             if (wcsncmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
                 return true;
         }
     } else {
-        for (size_t ich = 0; ich <= cchEndW; ++ich)
-        {
+        for (size_t ich = 0; ich <= cchEndW; ++ich) {
             if (_wcsnicmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
                 return true;
         }
@@ -207,8 +200,7 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
                                OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
                                NULL);
-    if (hFile == INVALID_HANDLE_VALUE)
-    {
+    if (hFile == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
         fwprintf(stderr, L"exegrep: warning: Cannot open file: '%ls' (error code: %lu)\n", file.c_str(),
                  error);
@@ -217,14 +209,12 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
 
     ULARGE_INTEGER FileSize;
     FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
-    if (FileSize.LowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
-    {
+    if (FileSize.LowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR) {
         fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
         return false;
     }
-    if (FileSize.QuadPart >= MAXLONG)
-    {
+    if (FileSize.QuadPart >= MAXLONG) {
         fwprintf(stderr, L"exegrep: warning: Too large file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
         return false;
@@ -244,9 +234,7 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
         cbRead == FileSize.QuadPart)
     {
         matched = match(data);
-    }
-    else
-    {
+    } else {
         fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
     }
 
@@ -285,21 +273,18 @@ RET ExeGrep::search(const files_t& files)
 
 RET ExeGrep::execute()
 {
-    if (m_help)
-    {
+    if (m_help) {
         usage();
         return RET_OK;
     }
 
-    if (m_version)
-    {
+    if (m_version) {
         version();
         return RET_OK;
     }
 
     files_t files;
-    for (auto& item : m_items)
-    {
+    for (auto& item : m_items) {
         RET ret = wildcard(files, item);
         if (ret != RET_OK)
             return ret;
@@ -310,16 +295,14 @@ RET ExeGrep::execute()
 
 RET ExeGrep::parse(INT argc, WCHAR **argv)
 {
-    if (argc <= 1)
-    {
+    if (argc <= 1) {
         m_help = true;
         return RET_OK;
     }
 
     bool has_pattern = false;
 
-    for (INT iarg = 1; iarg < argc; ++iarg)
-    {
+    for (INT iarg = 1; iarg < argc; ++iarg) {
         auto arg = argv[iarg];
         if (_wcsicmp(arg, L"/?") == 0 || _wcsicmp(arg, L"-h") == 0 ||
             _wcsicmp(arg, L"--help") == 0 || _wcsicmp(arg, L"-help") == 0)
@@ -361,14 +344,12 @@ RET ExeGrep::parse(INT argc, WCHAR **argv)
         m_items.emplace(arg);
     }
 
-    if (!has_pattern)
-    {
+    if (!has_pattern) {
         fwprintf(stderr, L"exegrep: error: No pattern specified\n");
         return RET_INVALID_ARG;
     }
 
-    if (m_items.empty())
-    {
+    if (m_items.empty()) {
         m_items.emplace(L"*");
     }
 
