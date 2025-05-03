@@ -209,7 +209,9 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
                                NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        fwprintf(stderr, L"exegrep: warning: Cannot open file: '%ls'\n", file.c_str());
+        DWORD error = GetLastError();
+        fwprintf(stderr, L"exegrep: warning: Cannot open file: '%ls' (error code: %lu)\n", file.c_str(),
+                 error);
         return false;
     }
 
@@ -257,11 +259,14 @@ RET ExeGrep::search(const files_t& files)
     size_t total = files.size();
     size_t processed = 0;
     bool show_progress = total >= 100 && !m_quiet;
+    double percent;
 
     std::vector<BYTE> data;
     for (auto& file : files) {
         if (show_progress) {
-            fwprintf(stderr, L"\rProcessing: %zu/%zu files...        ", processed, total);
+            percent = 100.0 * processed / total;
+            fwprintf(stderr, L"\rProcessing: %zu/%zu files (%.1f%%)...              ",
+                     processed, total, percent);
         }
         if (find(file, data)) {
             if (show_progress)
@@ -273,7 +278,7 @@ RET ExeGrep::search(const files_t& files)
     }
 
     if (show_progress)
-        fwprintf(stderr, L"\rProcessed: %zu files.        \n", total);
+        fwprintf(stderr, L"\rProcessed: %zu files.              \n", total);
 
     return RET_OK;
 }
