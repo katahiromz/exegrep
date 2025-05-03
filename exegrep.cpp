@@ -152,7 +152,7 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
     return ret;
 }
 
-bool AnsiFromWide(UINT codepage, std::string& ansi, const std::wstring& wide)
+static bool AnsiFromWide(UINT codepage, std::string& ansi, const std::wstring& wide)
 {
     INT cchA = WideCharToMultiByte(codepage, 0, wide.c_str(), wide.size(), NULL, 0, NULL, NULL);
     if (cchA == 0) {
