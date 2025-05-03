@@ -27,6 +27,7 @@ struct ExeGrep
     bool m_version = false;
     bool m_recursive = false;
     bool m_case_sensitive = false;
+    bool m_quiet = false;
     std::wstring m_pattern;
     std::set<std::wstring> m_items;
 
@@ -57,6 +58,7 @@ void ExeGrep::usage(void)
         L"\n"
         L"Options:\n"
         L"  -r          Recursive mode.\n"
+        L"  -q          Quiet mode.\n"
         L"  -c          Case sensitive search.\n"
         L"  --help      Show this message.\n"
         L"  --version   Show version info.\n"
@@ -75,7 +77,10 @@ RET ExeGrep::dir(files_t& files, const file_t& item)
 
 RET ExeGrep::do_item(files_t& files, const file_t& item)
 {
-    DWORD attrs = GetFileAttributesW(item.c_str());
+    WCHAR szFull[MAX_PATH];
+    GetFullPathNameW(item.c_str(), _countof(szFull), szFull, NULL);
+
+    DWORD attrs = GetFileAttributesW(szFull);
     if (attrs == (DWORD)-1)
     {
         fwprintf(stderr, L"exegrep: error: File not found: '%ls'\n", item.c_str());
@@ -84,12 +89,12 @@ RET ExeGrep::do_item(files_t& files, const file_t& item)
 
     if (!(attrs & FILE_ATTRIBUTE_DIRECTORY))
     {
-        files.emplace(item);
+        files.emplace(szFull);
         return RET_OK;
     }
 
     if (m_recursive)
-        return dir(files, item);
+        return dir(files, szFull);
 
     return RET_OK;
 }
@@ -249,14 +254,27 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
 
 RET ExeGrep::search(const files_t& files)
 {
-    for (auto& file : files)
-    {
-        std::vector<BYTE> data;
-        if (find(file, data))
-        {
+    size_t total = files.size();
+    size_t processed = 0;
+    bool show_progress = total >= 100 && !m_quiet;
+
+    std::vector<BYTE> data;
+    for (auto& file : files) {
+        if (show_progress) {
+            fwprintf(stderr, L"\rProcessing: %zu/%zu files...        ", processed, total);
+        }
+        if (find(file, data)) {
+            if (show_progress)
+                wprintf(L"\n");
             wprintf(L"%ls\n", file.c_str());
         }
+
+        ++processed;
     }
+
+    if (show_progress)
+        fwprintf(stderr, L"\rProcessed: %zu files.        \n", total);
+
     return RET_OK;
 }
 
@@ -321,6 +339,12 @@ RET ExeGrep::parse(INT argc, WCHAR **argv)
             _wcsicmp(arg, L"-case-sensitive") == 0)
         {
             m_case_sensitive = true;
+            continue;
+        }
+        if (_wcsicmp(arg, L"/Q") == 0 || _wcsicmp(arg, L"-q") == 0 ||
+            _wcsicmp(arg, L"--quiet") == 0 || _wcsicmp(arg, L"-quiet") == 0)
+        {
+            m_quiet = true;
             continue;
         }
         if (!has_pattern)
