@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <map>
 #include <new>
 #include <fcntl.h> // for _setmode
 
@@ -80,22 +81,19 @@ RET ExeGrep::dir(files_t& files, const file_t& item)
 
 RET ExeGrep::do_item(files_t& files, const file_t& item)
 {
-    WCHAR szFull[MAX_PATH];
-    GetFullPathNameW(item.c_str(), _countof(szFull), szFull, NULL);
-
-    DWORD attrs = GetFileAttributesW(szFull);
+    DWORD attrs = GetFileAttributesW(item.c_str());
     if (attrs == (DWORD)-1) {
         fwprintf(stderr, L"exegrep: error: File not found: '%ls'\n", item.c_str());
         return RET_FILE_NOT_FOUND;
     }
 
     if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        files.emplace(szFull);
+        files.emplace(item.c_str());
         return RET_OK;
     }
 
     if (m_recursive)
-        return dir(files, szFull);
+        return dir(files, item.c_str());
 
     return RET_OK;
 }
@@ -136,7 +134,9 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
                     break;
             }
         } else {
-            files.emplace(szFile);
+            WCHAR szFull[MAX_PATH];
+            GetFullPathNameW(szFile, _countof(szFull), szFull, NULL);
+            files.emplace(szFull);
             ret = RET_OK;
         }
     } while (FindNextFileW(hFind, &find));
@@ -145,21 +145,22 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
     return ret;
 }
 
-bool WideToAnsi(UINT codepage, std::string& ansi, const std::wstring& wide)
+bool AnsiFromWide(UINT codepage, std::string& ansi, const std::wstring& wide)
 {
-    INT cchA = WideCharToMultiByte(codepage, 0, wide.data(), wide.size(), NULL, 0, NULL, NULL);
-    if (cchA == 0)
+    INT cchA = WideCharToMultiByte(codepage, 0, wide.c_str(), wide.size(), NULL, 0, NULL, NULL);
+    if (cchA == 0) {
         return false;
+    }
 
     ansi.resize(cchA);
-    WideCharToMultiByte(codepage, 0, wide.data(), wide.size(), ansi.data(), ansi.size(), NULL, NULL);
+    WideCharToMultiByte(codepage, 0, wide.c_str(), wide.size(), &ansi[0], ansi.size(), NULL, NULL);
     return true;
 }
 
 bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern, bool case_sensitive)
 {
     size_t patlenA = pattern.size();
-    if (patlenA > data.size())
+    if (patlenA == 0 || patlenA > data.size())
         return false;
 
     const char *pchA = (const char *)data.data();
@@ -183,7 +184,7 @@ bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& 
 {
     size_t patlenW = pattern.size();
     size_t datalenW = data.size() / sizeof(WCHAR);
-    if (patlenW > datalenW)
+    if (patlenW == 0 || patlenW > datalenW)
         return false;
 
     LPCWSTR pchW = (LPCWSTR)data.data();
@@ -199,17 +200,18 @@ bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& 
                 return true;
         }
     }
+
     return false;
 }
 
 bool ExeGrep::match(const std::vector<BYTE>& data)
 {
     std::string patA;
-    if (WideToAnsi(CP_ACP, patA, m_pattern)) {
+    if (AnsiFromWide(CP_ACP, patA, m_pattern)) {
         if (find_pattern_a(data, patA, m_case_sensitive))
             return true;
     }
-    if (WideToAnsi(CP_UTF8, patA, m_pattern)) {
+    if (AnsiFromWide(CP_UTF8, patA, m_pattern)) {
         if (find_pattern_a(data, patA, m_case_sensitive))
             return true;
     }
