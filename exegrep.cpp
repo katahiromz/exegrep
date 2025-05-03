@@ -44,6 +44,9 @@ protected:
     RET do_item(files_t& files, const file_t& item);
     void usage();
     void version();
+
+    static bool find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern, bool case_sensitive);
+    static bool find_pattern_w(const std::vector<BYTE>& data, const std::wstring& pattern, bool case_sensitive);
 };
 
 void ExeGrep::version(void)
@@ -142,55 +145,76 @@ RET ExeGrep::wildcard(files_t& files, const file_t& item)
     return ret;
 }
 
-bool ExeGrep::match(const std::vector<BYTE>& data)
+bool WideToAnsi(UINT codepage, std::string& ansi, const std::wstring& wide)
 {
-    std::string patA;
-    bool is_ascii = true;
-    for (auto wch : m_pattern) {
-        if (wch > 0x7F)
-            is_ascii = false;
-        patA += (char)wch;
-    }
+    INT cchA = WideCharToMultiByte(codepage, 0, wide.data(), wide.size(), NULL, 0, NULL, NULL);
+    if (cchA == 0)
+        return false;
 
-    if (is_ascii) {
-        size_t patlenA = patA.size();
-        if (patlenA > data.size())
-            return false;
+    ansi.resize(cchA);
+    WideCharToMultiByte(codepage, 0, wide.data(), wide.size(), ansi.data(), ansi.size(), NULL, NULL);
+    return true;
+}
 
-        LPCSTR pchA = (LPCSTR)data.data();
-        size_t cchEndA = data.size() - patlenA;
-        if (m_case_sensitive) {
-            for (size_t ich = 0; ich <= cchEndA; ++ich) {
-                if (strncmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
-                    return true;
-            }
-        } else {
-            for (size_t ich = 0; ich <= cchEndA; ++ich) {
-                if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
-                    return true;
-            }
+bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern, bool case_sensitive)
+{
+    size_t patlenA = pattern.size();
+    if (patlenA > data.size())
+        return false;
+
+    const char *pchA = (const char *)data.data();
+    size_t cchEndA = data.size() - patlenA;
+    if (case_sensitive) {
+        for (size_t ich = 0; ich <= cchEndA; ++ich) {
+            if (strncmp(&pchA[ich], pattern.c_str(), pattern.size()) == 0)
+                return true;
+        }
+    } else {
+        for (size_t ich = 0; ich <= cchEndA; ++ich) {
+            if (_strnicmp(&pchA[ich], pattern.c_str(), pattern.size()) == 0)
+                return true;
         }
     }
 
-    size_t patlenW = m_pattern.size();
+    return false;
+}
+
+bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& pattern, bool case_sensitive)
+{
+    size_t patlenW = pattern.size();
     size_t datalenW = data.size() / sizeof(WCHAR);
     if (patlenW > datalenW)
         return false;
 
     LPCWSTR pchW = (LPCWSTR)data.data();
     size_t cchEndW = datalenW - patlenW;
-    if (m_case_sensitive) {
+    if (case_sensitive) {
         for (size_t ich = 0; ich <= cchEndW; ++ich) {
-            if (wcsncmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
+            if (wcsncmp(&pchW[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     } else {
         for (size_t ich = 0; ich <= cchEndW; ++ich) {
-            if (_wcsnicmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
+            if (_wcsnicmp(&pchW[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     }
     return false;
+}
+
+bool ExeGrep::match(const std::vector<BYTE>& data)
+{
+    std::string patA;
+    if (WideToAnsi(CP_ACP, patA, m_pattern)) {
+        if (find_pattern_a(data, patA, m_case_sensitive))
+            return true;
+    }
+    if (WideToAnsi(CP_UTF8, patA, m_pattern)) {
+        if (find_pattern_a(data, patA, m_case_sensitive))
+            return true;
+    }
+
+    return find_pattern_w(data, m_pattern, m_case_sensitive);
 }
 
 bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
