@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <new>
 #include <fcntl.h> // for _setmode
 
 typedef std::wstring file_t;
@@ -205,7 +206,13 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
         return false;
     }
 
-    data.resize((SIZE_T)FileSize.QuadPart);
+    try {
+        data.resize((SIZE_T)FileSize.QuadPart);
+    } catch (const std::bad_alloc&) {
+        fwprintf(stderr, L"exegrep: warning: Not enough memory for file: '%ls'\n", file.c_str());
+        CloseHandle(hFile);
+        return false;
+    }
 
     bool matched = false;
     DWORD cbRead;
