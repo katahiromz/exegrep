@@ -154,7 +154,7 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
 
         LPCSTR pchA = (LPCSTR)data.data();
         size_t cchEndA = data.size() - patlenA;
-        for (size_t ich = 0; ich < cchEndA; ++ich)
+        for (size_t ich = 0; ich <= cchEndA; ++ich)
         {
             if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
                 return true;
@@ -168,7 +168,7 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
 
     LPCWSTR pchW = (LPCWSTR)data.data();
     size_t cchEndW = datalenW - patlenW;
-    for (size_t ich = 0; ich < cchEndW; ++ich)
+    for (size_t ich = 0; ich <= cchEndW; ++ich)
     {
         if (_wcsnicmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
             return true;
