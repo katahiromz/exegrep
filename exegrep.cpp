@@ -141,7 +141,7 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
     bool is_ascii = true;
     for (auto wch : m_pattern)
     {
-        if (wch > 0xFF)
+        if (wch > 0x7F)
             is_ascii = false;
         patA += (char)wch;
     }
