@@ -1,5 +1,6 @@
 // exegrep
 // License: MIT
+#define NOMINMAX
 #include <windows.h>
 #include <shlwapi.h>
 #include <cstdlib>
@@ -8,8 +9,11 @@
 #include <string>
 #include <vector>
 #include <set>
-#include <map>
+#include <unordered_map>
 #include <new>
+#include <algorithm>
+#include <cctype>
+#include <cwctype>
 #include <fcntl.h> // for _setmode
 
 typedef std::wstring file_t;
@@ -159,6 +163,45 @@ bool AnsiFromWide(UINT codepage, std::string& ansi, const std::wstring& wide)
 
 bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern, bool case_sensitive)
 {
+#if 1 // Use Boyer-Moore algorithm
+    size_t patlen = pattern.size();
+    size_t datalen = data.size();
+    if (patlen == 0 || patlen > datalen)
+        return false;
+
+    // Preprocess pattern to create the bad character skip table
+    std::vector<size_t> skip(256, patlen);
+    auto adjust_char = [case_sensitive](char ch) -> unsigned char {
+        return static_cast<unsigned char>(case_sensitive ? ch : std::tolower(static_cast<unsigned char>(ch)));
+    };
+
+    for (size_t i = 0; i < patlen - 1; ++i)
+        skip[adjust_char(pattern[i])] = patlen - 1 - i;
+
+    const char* text = reinterpret_cast<const char*>(data.data());
+    size_t i = 0;
+
+    while (i <= datalen - patlen) {
+        size_t j = patlen - 1;
+        while (j < patlen) {
+            char text_ch = text[i + j];
+            char pat_ch = pattern[j];
+            if (!case_sensitive) {
+                text_ch = std::tolower(static_cast<unsigned char>(text_ch));
+                pat_ch = std::tolower(static_cast<unsigned char>(pat_ch));
+            }
+            if (text_ch != pat_ch)
+                break;
+            if (j == 0)
+                return true;
+            --j;
+        }
+
+        i += skip[adjust_char(text[i + patlen - 1])];
+    }
+
+    return false;
+#else
     size_t patlenA = pattern.size();
     if (patlenA == 0 || patlenA > data.size())
         return false;
@@ -178,10 +221,52 @@ bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& p
     }
 
     return false;
+#endif
 }
 
 bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& pattern, bool case_sensitive)
 {
+#if 1 // Use Boyer-Moore algorithm
+    size_t patlen = pattern.size();
+    size_t datalen = data.size() / sizeof(WCHAR);
+    if (patlen == 0 || patlen > datalen)
+        return false;
+
+    const WCHAR* text = reinterpret_cast<const WCHAR*>(data.data());
+
+    // Bad character shift table using unordered_map
+    std::unordered_map<WCHAR, size_t> skip;
+    auto adjust_char = [case_sensitive](WCHAR ch) -> WCHAR {
+        return case_sensitive ? ch : towlower(ch);
+    };
+
+    size_t default_skip = patlen;
+    for (size_t i = 0; i < patlen - 1; ++i)
+        skip[adjust_char(pattern[i])] = patlen - 1 - i;
+
+    size_t i = 0;
+    while (i <= datalen - patlen) {
+        size_t j = patlen - 1;
+        while (j < patlen) {
+            WCHAR text_ch = text[i + j];
+            WCHAR pat_ch = pattern[j];
+            if (!case_sensitive) {
+                text_ch = towlower(text_ch);
+                pat_ch = towlower(pat_ch);
+            }
+            if (text_ch != pat_ch)
+                break;
+            if (j == 0)
+                return true;
+            --j;
+        }
+
+        WCHAR next_char = adjust_char(text[i + patlen - 1]);
+        i += skip.count(next_char) ? skip[next_char] : default_skip;
+    }
+
+    return false;
+#else
     size_t patlenW = pattern.size();
     size_t datalenW = data.size() / sizeof(WCHAR);
     if (patlenW == 0 || patlenW > datalenW)
@@ -202,6 +287,7 @@ bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& 
     }
 
     return false;
+#endif
 }
 
 bool ExeGrep::match(const std::vector<BYTE>& data)
