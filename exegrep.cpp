@@ -26,6 +26,7 @@ struct ExeGrep
     bool m_help = false;
     bool m_version = false;
     bool m_recursive = false;
+    bool m_case_sensitive = false;
     std::wstring m_pattern;
     std::set<std::wstring> m_items;
 
@@ -54,8 +55,9 @@ void ExeGrep::usage(void)
     wprintf(
         L"Usage: exegrep [OPTIONS] STRING [FILES]\n"
         L"\n"
-        L"ExeGrep:\n"
+        L"Options:\n"
         L"  -r          Recursive mode.\n"
+        L"  -c          Case sensitive search.\n"
         L"  --help      Show this message.\n"
         L"  --version   Show version info.\n"
         L"\n"
@@ -155,10 +157,18 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
 
         LPCSTR pchA = (LPCSTR)data.data();
         size_t cchEndA = data.size() - patlenA;
-        for (size_t ich = 0; ich <= cchEndA; ++ich)
-        {
-            if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
-                return true;
+        if (m_case_sensitive) {
+            for (size_t ich = 0; ich <= cchEndA; ++ich)
+            {
+                if (strncmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
+                    return true;
+            }
+        } else {
+            for (size_t ich = 0; ich <= cchEndA; ++ich)
+            {
+                if (_strnicmp(&pchA[ich], patA.c_str(), patA.size()) == 0)
+                    return true;
+            }
         }
     }
 
@@ -169,12 +179,19 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
 
     LPCWSTR pchW = (LPCWSTR)data.data();
     size_t cchEndW = datalenW - patlenW;
-    for (size_t ich = 0; ich <= cchEndW; ++ich)
-    {
-        if (_wcsnicmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
-            return true;
+    if (m_case_sensitive) {
+        for (size_t ich = 0; ich <= cchEndW; ++ich)
+        {
+            if (wcsncmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
+                return true;
+        }
+    } else {
+        for (size_t ich = 0; ich <= cchEndW; ++ich)
+        {
+            if (_wcsnicmp(&pchW[ich], m_pattern.c_str(), m_pattern.size()) == 0)
+                return true;
+        }
     }
-
     return false;
 }
 
@@ -297,6 +314,13 @@ RET ExeGrep::parse(INT argc, WCHAR **argv)
             _wcsicmp(arg, L"--recursive") == 0 || _wcsicmp(arg, L"-recursive") == 0)
         {
             m_recursive = true;
+            continue;
+        }
+        if (_wcsicmp(arg, L"/C") == 0 || _wcsicmp(arg, L"-c") == 0 ||
+            _wcsicmp(arg, L"--case-sensitive") == 0 ||
+            _wcsicmp(arg, L"-case-sensitive") == 0)
+        {
+            m_case_sensitive = true;
             continue;
         }
         if (!has_pattern)
