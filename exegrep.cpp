@@ -187,7 +187,7 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
     if (hFile == INVALID_HANDLE_VALUE)
     {
         fwprintf(stderr, L"exegrep: warning: Cannot open file: '%ls'\n", file.c_str());
-        return RET_OK;
+        return false;
     }
 
     ULARGE_INTEGER FileSize;
@@ -196,13 +196,13 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
     {
         fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
-        return RET_OK;
+        return false;
     }
     if (FileSize.QuadPart >= MAXLONG)
     {
         fwprintf(stderr, L"exegrep: warning: Too large file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
-        return RET_OK;
+        return false;
     }
 
     data.resize((SIZE_T)FileSize.QuadPart);
