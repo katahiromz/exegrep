@@ -18,6 +18,7 @@
 
 typedef std::wstring file_t;
 typedef std::set<std::wstring> files_t;
+typedef std::string binary_t;
 
 enum RET
 {
@@ -44,22 +45,22 @@ protected:
     RET search(const files_t& files);
     RET wildcard(files_t& files, const file_t& item);
     RET dir(files_t& files, const file_t& item);
-    bool find(const file_t& file, std::vector<BYTE>& data);
-    bool match(const std::vector<BYTE>& data);
+    bool find(const file_t& file, binary_t& data);
+    bool match(const binary_t& data);
     RET do_item(files_t& files, const file_t& item);
     void usage();
     void version();
 
     template <bool t_case_sensitive>
-    static bool find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern);
+    static bool find_pattern_a(const binary_t& data, const std::string& pattern);
 
     template <bool t_case_sensitive>
-    static bool find_pattern_w(const std::vector<BYTE>& data, const std::wstring& pattern);
+    static bool find_pattern_w(const binary_t& data, const std::wstring& pattern);
 };
 
 void ExeGrep::version(void)
 {
-    wprintf(L"exegrep version 1.2 by katahiromz\n");
+    wprintf(L"exegrep version 1.3 by katahiromz\n");
 }
 
 void ExeGrep::usage(void)
@@ -165,9 +166,9 @@ static bool AnsiFromWide(UINT codepage, std::string& ansi, const std::wstring& w
 }
 
 template <bool t_case_sensitive>
-bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& pattern)
+bool ExeGrep::find_pattern_a(const binary_t& data, const std::string& pattern)
 {
-#if 1 // Use Boyer-Moore algorithm
+#ifdef USE_BOYER_MOORE // Use Boyer-Moore algorithm
     size_t patlen = pattern.size();
     size_t datalen = data.size();
     if (patlen == 0 || patlen > datalen)
@@ -182,7 +183,7 @@ bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& p
     for (size_t i = 0; i < patlen - 1; ++i)
         skip[adjust_char(pattern[i])] = patlen - 1 - i;
 
-    const char* text = reinterpret_cast<const char*>(data.data());
+    auto text = reinterpret_cast<const char*>(data.data());
     size_t i = 0;
 
     while (i <= datalen - patlen) {
@@ -210,16 +211,16 @@ bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& p
     if (patlenA == 0 || patlenA > data.size())
         return false;
 
-    const char *pchA = (const char *)data.data();
+    auto text = reinterpret_cast<const char*>(data.data());
     size_t cchEndA = data.size() - patlenA;
     if (t_case_sensitive) {
         for (size_t ich = 0; ich <= cchEndA; ++ich) {
-            if (strncmp(&pchA[ich], pattern.c_str(), pattern.size()) == 0)
+            if (strncmp(&text[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     } else {
         for (size_t ich = 0; ich <= cchEndA; ++ich) {
-            if (_strnicmp(&pchA[ich], pattern.c_str(), pattern.size()) == 0)
+            if (_strnicmp(&text[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     }
@@ -229,15 +230,15 @@ bool ExeGrep::find_pattern_a(const std::vector<BYTE>& data, const std::string& p
 }
 
 template <bool t_case_sensitive>
-bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& pattern)
+bool ExeGrep::find_pattern_w(const binary_t& data, const std::wstring& pattern)
 {
-#if 1 // Use Boyer-Moore algorithm
+#ifdef USE_BOYER_MOORE // Use Boyer-Moore algorithm
     size_t patlen = pattern.size();
     size_t datalen = data.size() / sizeof(WCHAR);
     if (patlen == 0 || patlen > datalen)
         return false;
 
-    const WCHAR* text = reinterpret_cast<const WCHAR*>(data.data());
+    auto text = reinterpret_cast<const WCHAR*>(data.data());
 
     // Bad character shift table using unordered_map
     std::unordered_map<WCHAR, size_t> skip;
@@ -277,16 +278,16 @@ bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& 
     if (patlenW == 0 || patlenW > datalenW)
         return false;
 
-    LPCWSTR pchW = (LPCWSTR)data.data();
+    auto text = reinterpret_cast<const WCHAR*>(data.data());
     size_t cchEndW = datalenW - patlenW;
     if (t_case_sensitive) {
         for (size_t ich = 0; ich <= cchEndW; ++ich) {
-            if (wcsncmp(&pchW[ich], pattern.c_str(), pattern.size()) == 0)
+            if (wcsncmp(&text[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     } else {
         for (size_t ich = 0; ich <= cchEndW; ++ich) {
-            if (_wcsnicmp(&pchW[ich], pattern.c_str(), pattern.size()) == 0)
+            if (_wcsnicmp(&text[ich], pattern.c_str(), pattern.size()) == 0)
                 return true;
         }
     }
@@ -295,7 +296,7 @@ bool ExeGrep::find_pattern_w(const std::vector<BYTE>& data, const std::wstring& 
 #endif
 }
 
-bool ExeGrep::match(const std::vector<BYTE>& data)
+bool ExeGrep::match(const binary_t& data)
 {
     std::string patA;
 
@@ -326,7 +327,7 @@ bool ExeGrep::match(const std::vector<BYTE>& data)
     }
 }
 
-bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
+bool ExeGrep::find(const file_t& file, binary_t& data)
 {
     DWORD dwFileShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     HANDLE hFile = CreateFileW(file.c_str(), GENERIC_READ, dwFileShare, NULL,
@@ -347,11 +348,13 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
         CloseHandle(hFile);
         return false;
     }
+#ifndef _WIN64
     if (FileSize.QuadPart >= MAXLONG) {
         fwprintf(stderr, L"exegrep: warning: Too large file: '%ls'\n", file.c_str());
         CloseHandle(hFile);
         return false;
     }
+#endif
 
     try {
         data.resize((SIZE_T)FileSize.QuadPart);
@@ -363,9 +366,7 @@ bool ExeGrep::find(const file_t& file, std::vector<BYTE>& data)
 
     bool matched = false;
     DWORD cbRead;
-    if (ReadFile(hFile, data.data(), (DWORD)data.size(), &cbRead, NULL) &&
-        cbRead == FileSize.QuadPart)
-    {
+    if (ReadFile(hFile, &data[0], (DWORD)data.size(), &cbRead, NULL) && cbRead == FileSize.QuadPart) {
         matched = match(data);
     } else {
         fwprintf(stderr, L"exegrep: warning: Cannot read file: '%ls'\n", file.c_str());
@@ -382,7 +383,7 @@ RET ExeGrep::search(const files_t& files)
     bool show_progress = total >= 100 && !m_quiet;
     double percent;
 
-    std::vector<BYTE> data;
+    binary_t data;
     for (auto& file : files) {
         if (show_progress) {
             percent = 100.0 * processed / total;

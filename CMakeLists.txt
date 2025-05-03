@@ -10,6 +10,13 @@ project(exegrep VERSION 1.1 LANGUAGES CXX)
 # UTF-8 source code
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
+# Use Boyer-Moore algorithm?
+option(USE_BOYER_MOORE "Use Boyer-Moore algorithm" ON)
+if(USE_BOYER_MOORE)
+    add_definitions(-DUSE_BOYER_MOORE)
+endif()
+message(STATUS "USE_BOYER_MOORE = ${USE_BOYER_MOORE}")
+
 ##############################################################################
 
 # exegrep.exe
